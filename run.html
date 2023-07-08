@@ -1,0 +1,769 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Jact</title>
+        <script src="https://unpkg.com/vue@3.2.21/dist/vue.global.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.21/lodash.min.js"></script>
+    </head>
+    <body>
+        <h1>There</h1>
+    </body>
+    <script>
+        class Jact{
+            static createComponent(name, template, setup){
+                const {shadowRoot, element} = Jact._renderTemplate(name, template);
+
+                const setupControllers = {
+                    ref: Vue.ref,
+                    computed: Vue.computed,
+                    $this: () => {},
+                    watch: () => Vue.watch,
+                    onMounted: () => {},
+                    onUnmounted: () => {},
+                    onNextTick: (callback) => {
+                        setupControllers.__machine.internalState.nextTickListeners.push({callback, executed: false})
+                    },
+                    props: {},
+                    config: {
+                        name: "JactStandardElement",
+                        components: [],
+                    },
+                    emit: () => {},
+                    listenFor: () => {},
+                    __machine: {
+                        internalState: {
+                            nextTickListeners: [],
+                            executeNextTickListeners: () => {
+                                setupControllers.__machine.internalState.nextTickListeners.forEach((listener) => {
+                                    listener.callback();
+                                    listener.executed = true;
+                                })
+                                setupControllers.__machine.internalState.nextTickListeners = setupControllers.__machine.internalState.nextTickListeners.filter((listener) => {
+                                    return !listener.executed;
+                                })
+                            }
+                        }
+                    }
+                }
+
+                const environmentVariables = setup(setupControllers);
+                Jact._renderReactivity(shadowRoot, environmentVariables, setupControllers);
+
+                return shadowRoot;
+            }
+
+
+            static _renderTemplate(name, template){
+                const templateDOM = document.createElement(name);
+                templateDOM.innerHTML = template;
+                
+
+                const style = templateDOM.querySelector('style');
+                const templateHTML = templateDOM.querySelector('template');
+                
+                const html = document.createElement(name);
+                html.innerHTML = templateHTML.innerHTML;
+                templateDOM.removeChild(templateHTML);
+                templateDOM.appendChild(html);
+
+                const shadowRoot = templateDOM.attachShadow({mode: 'open'});
+                shadowRoot.appendChild(style);
+                shadowRoot.appendChild(html);
+
+                return {shadowRoot, element: templateDOM};
+            }
+
+            static _renderReactivity(shadowRoot, rootScopeVariables, setupControllers){
+                const renderElement = (element, environmentVariables) => {
+                    console.log(element, environmentVariables)
+                    const createScopeVariables = (environmentVariables) => {
+                        const controls = {
+                            get: (variableName) => {
+                                return environmentVariables[variableName];
+                            },
+                            exists: (variableName) => {
+                                return environmentVariables[variableName] !== undefined;
+                            },
+                            set: (variableName, value) => {
+                                environmentVariables[variableName] = value;
+                            },
+                            delete: (variableName) => {
+                                delete environmentVariables[variableName];
+                            },
+                            getNames: () => {
+                                return Object.keys(environmentVariables);
+                            },
+                            getValues: () => {
+                                return Object.values(environmentVariables);
+                            },
+                            getValuesForEval: () => {
+                                let valuesForEval = {};
+                                controls.getNames().forEach((name) => {
+                                    valuesForEval[name] = environmentVariables[name];
+                                })
+                                controls.getNamesReactives().forEach((reactiveName) => {
+                                    //Create a new object with getters and setters:
+                                    const ob = {};
+                                    Object.defineProperty(ob, 'value', {
+                                        get: () => {
+                                            return environmentVariables[reactiveName].value;
+                                        },
+                                        set: (value) => {
+                                            environmentVariables[reactiveName].value = value;
+                                        }
+                                    })
+                                    valuesForEval[reactiveName] = ob.value;
+                                })
+                                return Object.values(valuesForEval);
+                            },
+                            isReactive: (variableName) => {
+                                if (typeof environmentVariables[variableName] !== 'object'){
+                                    return false;
+                                }
+                                if (typeof environmentVariables[variableName]["__v_isRef"] === 'undefined'){
+                                    return false;
+                                }
+                                return true;
+                            },
+                            getNamesReactives: () => {
+                                const reactives = [];
+                                Object.keys(environmentVariables).forEach((key) => {
+                                    if (scopeVariables.isReactive(key)){
+                                        reactives.push(key);
+                                    }
+                                })
+                                return reactives;
+                            },
+                            toString: () => {
+                                return JSON.stringify(environmentVariables);
+                            },
+                            clone: () => {
+                                const onlyClonableVariables = (() => {
+                                    //Return all environmentVariables that are not functions:
+                                    const variables = {};
+                                    Object.keys(environmentVariables).forEach((key) => {
+                                        if(typeof environmentVariables[key] !== 'function'){
+                                            variables[key] = environmentVariables[key];
+                                        }
+                                        if (scopeVariables.isReactive(key)){
+                                            variables[key] = environmentVariables[key];
+                                        }
+                                    })
+                                    return variables;
+                                })();
+                                const onlyFunctionsVariables = (() => {
+                                    //Return all environmentVariables that are functions:
+                                    const variables = {};
+                                    Object.keys(environmentVariables).forEach((key) => {
+                                        if(typeof environmentVariables[key] === 'function'){
+                                            variables[key] = environmentVariables[key];
+                                        }
+                                    })
+                                    return variables;
+                                })();
+                                const onlyProxiesVariables = (() => {
+                                    //Return all environmentVariables that are functions:
+                                    const variables = {};
+                                    Object.keys(environmentVariables).forEach((key) => {
+                                        if (scopeVariables.isReactive(key)){
+                                            variables[key] = environmentVariables[key];
+                                        }
+                                    })
+                                    return variables;
+                                })();
+                                const clone = _.cloneDeep(onlyClonableVariables)
+                                //const clone = structuredClone(onlyNonFunctionsVariables);
+                                Object.keys(onlyFunctionsVariables).forEach((key) => {
+                                    clone[key] = onlyFunctionsVariables[key];
+                                })
+                                Object.keys(onlyProxiesVariables).forEach((key) => {
+                                    clone[key] = onlyProxiesVariables[key];
+                                })
+                                return createScopeVariables(clone);
+                            },
+                            export: () => {
+                                return environmentVariables;
+                            }
+                        }
+
+                        return controls;
+                    }
+                    
+                    const scopeVariables = createScopeVariables(environmentVariables);
+
+
+
+
+                    const createForEach = (element) => {
+                        const attributes = element.attributes;
+                        let attributesToRemove = [];
+                        let functionsToExecute = [];
+                        for(let i = 0; i < attributes.length; i++){
+                            const attribute = attributes[i];
+                            if(attribute.name.startsWith('r-for')){
+                                const iterationExpression = attribute.value;
+                                const iterationArrayVariableName = iterationExpression.split(" in ")[1].trim();
+                                const localScopeVariableName = iterationExpression.split(" in ")[0].trim();
+
+                                if (!scopeVariables.exists(iterationArrayVariableName)){
+                                    throw `There is no variable called "${iterationArrayVariableName}" on the local scope.`;
+                                }
+                                const arrayToIterate = scopeVariables.get(iterationArrayVariableName);
+                                if (scopeVariables.isReactive(iterationArrayVariableName) && !Array.isArray(arrayToIterate.value)){
+                                    throw `The variable "${iterationArrayVariableName}" is not an array`;
+                                }else if (!Array.isArray(arrayToIterate) && !scopeVariables.isReactive(iterationArrayVariableName)){
+                                    throw `The variable "${iterationArrayVariableName}" is not an array`;
+                                }
+
+                                const arrayItems = (() => {
+                                    if (scopeVariables.isReactive(iterationArrayVariableName)){
+                                        return arrayToIterate.value;
+                                    }else{
+                                        return arrayToIterate;
+                                    }
+                                })();
+                                arrayItems.forEach((itemValue) => {
+                                    const nestedScopeVariables = scopeVariables.clone();
+                                    nestedScopeVariables.set(localScopeVariableName, itemValue);
+
+
+                                    const createElement = () => {
+                                        const rootElement = element;
+                                        const childElement = document.createElement(rootElement.tagName);
+
+                                        for(let i = 0; i < rootElement.attributes.length; i++){
+                                            const rootElementAttribute = rootElement.attributes[i];
+                                            if(attribute.name.startsWith('r-for')){
+                                                continue;
+                                            }
+                                            childElement.setAttribute(rootElementAttribute.name, rootElementAttribute.value);
+                                        }
+                                        childElement.innerHTML = rootElement.getAttribute("html");
+
+                                        return childElement;
+                                    }
+
+
+                                    const childElement = createElement();
+                                    childElement.querySelectorAll('*').forEach((element) => {
+                                        renderElement(element, nestedScopeVariables.export());
+                                    })
+                                    element.parentElement.insertBefore(childElement, element);
+                                })
+                                element.parentElement.removeChild(element);
+
+                                const addRForReactivity = () => {
+                                    const isReactive = scopeVariables.isReactive(iterationArrayVariableName);
+                                    if (!isReactive){
+                                        return;
+                                    }
+                                    console.log("Adding reactive for", arrayToIterate);
+                                    let oldArray = _.cloneDeep(arrayToIterate);
+                                    Vue.watch(() => (arrayToIterate), (newArray) => {
+                                        console.log("Array changed", {newArray, oldArray});
+
+                                        //Check for: array order change, item type change, item added, item removed:
+                                        //Order change:
+                                        const renderRequired = {
+                                            orderChange: [],
+                                            itemTypeChange: [],
+                                            itemAdded: [],
+                                            itemRemoved: []
+                                        }
+
+                                        const itemsAdded = () => {
+                                            //Check for new items added camparing oldArray with newArray and return a list of items added:
+                                            const itemsAdded = [];
+                                            for(let i = 0; i < newArray.value.length; i++){
+                                                if (!oldArray.value.includes(newArray.value[i])){
+                                                    itemsAdded.push(newArray.value[i]);
+                                                }
+                                            }
+                                            renderRequired.itemAdded = itemsAdded;
+                                        }
+                                        const itemsRemoved = () => {
+                                            //Check for new items added camparing oldArray with newArray and return a list of items added:
+                                            const itemsRemoved = [];
+                                            for(let i = 0; i < oldArray.value.length; i++){
+                                                if (!newArray.value.includes(oldArray.value[i])){
+                                                    itemsRemoved.push(oldArray.value[i]);
+                                                }
+                                            }
+                                            renderRequired.itemRemoved = itemsRemoved;
+                                        }
+
+                                        const orderChange = () => {
+                                            const orderHasChanged = () => {
+                                                if (newArray.length !== oldArray.length){
+                                                    return true;
+                                                }
+                                                for(let i = 0; i < newArray.length; i++){
+                                                    if (newArray[i] !== oldArray[i]){
+                                                        return true;
+                                                    }
+                                                }
+                                                return false;
+                                            }
+                                            const didOrderHasChanged = orderHasChanged();
+                                            if (!didOrderHasChanged){
+                                                return;
+                                            }
+
+                                        }
+                                        const itemTypeChange = () => {
+                                            const itemTypeHasChanged = () => {
+                                                if (newArray.length !== oldArray.length){
+                                                    return true;
+                                                }
+                                                for(let i = 0; i < newArray.length; i++){
+                                                    if (typeof newArray[i] !== typeof oldArray[i]){
+                                                        return true;
+                                                    }
+                                                }
+                                                return false;
+                                            }
+                                            const didItemTypeHasChanged = itemTypeHasChanged();
+                                            if (!didItemTypeHasChanged){
+                                                return;
+                                            }
+                                        }
+
+
+                                        itemsAdded();
+                                        itemsRemoved();
+                                        console.log(renderRequired)
+                                        oldArray = _.cloneDeep(newArray);
+                                    }, {
+                                        deep: false
+                                    })
+                                }
+                                addRForReactivity()
+                            }
+                        }
+                        //Remove attributes
+
+                        attributesToRemove.forEach((attributeName) => {
+                            element.removeAttribute(attributeName);
+                        })
+                    }
+
+
+                    const addEventListenersFromAttributes = (element) => {
+                        const attributes = element.attributes;
+                        let attributesToRemove = [];
+                        for(let i = 0; i < attributes.length; i++){
+                            const attribute = attributes[i];
+                            if(attribute.name.startsWith('@')){
+                                const eventName = attribute.name.replace('@', '');
+                                const eventFunction = environmentVariables[attribute.value];
+                                element.addEventListener(eventName, eventFunction);
+                                attributesToRemove.push(attribute.name);
+                            }
+                        }
+                        //Remove attributes
+                        attributesToRemove.forEach((attributeName) => {
+                            element.removeAttribute(attributeName);
+                        })
+                    }
+                    
+                    const replaceTextNodesWithMustacheExpressions = (element) => {
+                        if(element.childNodes.length === 1 && element.childNodes[0].nodeType === 3){
+                            const textNode = element.childNodes[0];
+                            const text = textNode.textContent;
+                            const mustacheRegex = /{{(.*)}}/g;
+                            const matches = mustacheRegex.exec(text);
+                            if(matches){
+
+                                const metadata = {
+                                    template: textNode.textContent
+                                }
+
+                                Object.defineProperty(textNode, 'metadata', {
+                                    get: () => {
+                                        return metadata;
+                                    },
+                                    set: (value) => {
+                                        metadata = value;
+                                    }
+                                })
+
+                                const key = matches[1].trim();
+                                const variableName = key;
+
+                                const variableToText = (variable) => {
+                                    if (typeof variable === 'object'){
+                                        return JSON.stringify(variable);
+                                    }else if (typeof variable === 'array'){
+                                        return JSON.stringify(variable);
+                                    }
+                                    return variable;
+                                }
+                                const replaceTextContent = (variableName, variableValue) => {
+                                    const newTextContent = textNode.metadata.template.replaceAll(matches[0], variableToText(variableValue));
+                                    textNode.textContent = newTextContent
+                                }
+
+
+                                
+
+
+                                const variableValue = scopeVariables.get(key);
+                                const variableIsReactive = scopeVariables.isReactive(key);
+
+                                if (!variableIsReactive){
+                                    replaceTextContent(variableName, variableValue);
+                                }else{
+                                    replaceTextContent(variableName, variableValue.value);
+
+                                    Vue.watch(variableValue, (newValue) => {
+                                        replaceTextContent(variableName, newValue);
+                                        setupControllers.__machine.internalState.executeNextTickListeners();
+                                    })
+                                }
+                            }
+                        }
+                    }
+
+                    const replaceStatementsFromAttributes = (element) => {
+                        const createFunction = (attributeValue) => {
+                            return new Function (...scopeVariables.getNames(), `return ${attributeValue}`);
+                        }
+                        const executeFunction = (func) => {
+                            return func(...scopeVariables.getValuesForEval());
+                        }
+
+
+                        const attributes = element.attributes;
+                        let attributesToRemove = [];
+                        let functionsToExecute = [];
+                        for(let i = 0; i < attributes.length; i++){
+                            const attribute = attributes[i];
+                            if(attribute.name.startsWith(':')){
+                                const func = createFunction(attribute.value);
+                                attributesToRemove.push(attribute.name);
+                                functionsToExecute.push({
+                                    attribute: attribute.name,
+                                    attributeValue: attribute.value,
+                                    execute: () => {
+                                        return executeFunction(func);
+                                    }
+                                });
+                            }
+                        }
+                        //Remove attributes
+                        attributesToRemove.forEach((attributeName) => {
+                            element.removeAttribute(attributeName);
+                        })
+
+
+                        //Apply functions response to attributes and save state
+                        let stateFunctionsResponses = {}
+                        functionsToExecute.forEach((item) => {
+                            const response = item.execute();
+                            stateFunctionsResponses[item.attribute] = response;
+                            element.setAttribute(item.attribute.replace(':', ''), response);
+                        })
+
+
+                        //Add watchers for reactive variables:
+                        const reactiveVariablesNames = scopeVariables.getNamesReactives();
+                        reactiveVariablesNames.forEach((reactiveVariableName) => {
+                            const reactiveVariable = scopeVariables.get(reactiveVariableName);
+                            Vue.watch(reactiveVariable, (newValue) => {
+                                functionsToExecute.forEach((item) => {
+                                    item.execute = () => {
+                                        return executeFunction(createFunction(item.attributeValue))
+                                    }
+
+                                    const response = item.execute();
+                                    if (stateFunctionsResponses[item.attribute] != response){
+                                        //Apply change on DOM only if the response is different
+                                        stateFunctionsResponses[item.attribute] = response;
+                                        element.setAttribute(item.attribute.replace(':', ''), response);
+                                        setupControllers.__machine.internalState.executeNextTickListeners();
+                                    }
+                                })
+                            })
+                        })
+                    }
+                
+                    const activateModels = (element) => {
+                        const modelVariable = element.getAttribute('r-model');
+                        let updating = {
+                            startUpdate: () => {
+                                updating._machine.isUpdating = true;
+                            },
+                            finishUpdate: () => {
+                                updating._machine.isUpdating = false;
+                                updating._machine.callbacks.forEach((callback) => {
+                                    callback();
+                                })
+                            },
+                            _machine: {
+                                isUpdating: false,
+                                callbacks: []
+                            },
+                            waitingForUpdateReachsWathers: (callback) => {
+                                updating._machine.callbacks.push(callback);
+                            },
+                            isUpdating: () => {
+                                return updating._machine.isUpdating;
+                            }
+                        };
+
+
+                        const initializeWithVariableValue = () => {
+                            const variable = scopeVariables.get(modelVariable);
+                            switch(element.tagName){
+                                case 'INPUT':
+                                    element.value = variable.value;
+                                    break;
+                                case 'SELECT':
+                                    element.value = variable.value;
+                                    break;
+                                default:
+                                    throw `The tag "${element.tagName}" is not supported for r-model`;
+                            }
+                        }
+                        const bindChangeEvent = () => {
+                            switch(element.tagName){
+                                case 'INPUT':
+                                    element.addEventListener('input', () => {
+                                        updating.startUpdate();
+                                        scopeVariables.get(modelVariable).value = element.value;
+                                    })
+                                    break;
+                                case 'SELECT':
+                                    element.addEventListener('input', () => {
+                                        
+                                        updating.startUpdate();
+                                        scopeVariables.get(modelVariable).value = element.value;
+                                    })
+                                    break;
+                                default:
+                                    throw `The tag "${element.tagName}" is not supported for r-model`;
+                            }
+                        }
+
+                        const listenToVariableChanges = () => {
+                            const variableName = element.getAttribute('r-model');
+                            const variable = scopeVariables.get(variableName);
+                            Vue.watch(variable, (newValue) => {
+                                if (updating.isUpdating()){
+                                    return;
+                                }
+
+                                switch(element.tagName){
+                                    case 'INPUT':
+                                        element.value = newValue;
+                                        break;
+                                    case 'SELECT':
+                                        element.value = newValue;
+                                        break;
+                                    default:
+                                        throw `The tag "${element.tagName}" is not supported for r-model`;
+                                }
+                                updating.finishUpdate();
+                                setupControllers.__machine.internalState.executeNextTickListeners();
+                            })
+                        }
+                        
+                        const removeRModelAttribute = () => {
+                            element.removeAttribute('r-model');
+                        }
+
+
+                        if (!element.hasAttribute('r-model')){
+                            return;
+                        }
+
+                        initializeWithVariableValue();
+                        bindChangeEvent();
+                        listenToVariableChanges();
+                        removeRModelAttribute();
+                    }
+
+
+                    addEventListenersFromAttributes(element);
+                    replaceTextNodesWithMustacheExpressions(element);
+                    replaceStatementsFromAttributes(element);
+                    activateModels(element);
+                    createForEach(element);
+                }
+
+
+
+                const prepareShadowDOM = () => {
+                    const transformRForElements = (rootNode) => {
+                        const queue = [rootNode];
+                        const rForElementsInverted = [];
+                        while (queue.length > 0) {
+                            const currentNode = queue.shift();
+                            if (currentNode.hasAttribute !== undefined){
+                                if (currentNode.hasAttribute('r-for')){
+                                    rForElementsInverted.push(currentNode);
+                                }
+                            }
+                            
+                            const childNodes = currentNode.childNodes;
+                            for (let i = 0; i < childNodes.length; i++) {
+                                queue.push(childNodes[i]);
+                            }
+                        }
+
+                        const rForElements = rForElementsInverted.reverse();
+                        rForElements.forEach((element) => {
+                            element.setAttribute("html", element.innerHTML);
+                            element.innerHTML = "";
+                        })
+                        return rForElements;
+                    }
+
+                    transformRForElements(shadowRoot);
+                }
+
+                prepareShadowDOM();
+
+                const elements = shadowRoot.querySelectorAll('*');
+                elements.forEach((element) => {
+                    renderElement(element, rootScopeVariables);
+                })
+            }
+        }
+
+        const componentTemplate = Jact.createComponent("my-template",`
+            <template>
+                <button @click="add">Adicionar</button>
+                <button @click="remove">Remover</button>
+
+                <input r-model="participant">
+
+                <select r-model="selector">
+                    <option value="Cachorro">Cachorro</option>
+                    <option value="Gato">Gato</option>
+                    <option value="Papagaio">Papagaio</option>
+                </select>
+
+                <button @click="changeParticipantName">Clique aqui para ver o participante {{participant}}</button>
+
+                <div :r-if="potentials.a == counter">
+                    <h1>{{ selector }}</h1>
+                    <span>{{ textInfo }}</span>
+                </div>
+
+                <pre>{{subitems}}</pre>
+                <p>Cachorro</p>
+                <div r-for="item in items">
+                    <button @click="addToArray">Add to array</button>    
+                    <p>{{ textInfo }}</p>
+                    <content r-for="subitem in listPatients">
+                        <p>{{ subitem }}</p>    
+                    </content>
+                </div>
+                <div>
+                    <article r-for="item in items">
+                        <p>item</p>
+                    </article>    
+                </div>
+            </template>
+
+            <style>
+                button{
+                    background-color: red;
+                }
+                h1{
+                    color: red;
+                }
+                div{
+                    > h1{
+                        color: blue;
+                    }
+                }
+                a{
+                    > p{
+                        color: green;
+                    }
+                }
+            </style>
+        `, (setup) => {
+            const {config} = setup;
+            const {ref, computed, onNextTick} = setup;
+
+            config.name = "MyTemplate";
+            config.components = [];
+
+            const counter = ref(0);
+
+            const textInfo = computed(() => {
+                return "Counter: " + counter.value;
+            })
+            const participant = ref("Bruno Freire");
+            const selector = ref("Cachorro");
+
+            const listPatients = ref([1,2,3,4,5])
+
+            const add = () => {
+                counter.value++;
+            }
+            const remove = () => {
+                counter.value--;
+            }
+            const changeParticipantName = () => {
+                participant.value = "Fabio Freire";
+            }
+            const onMouseover = () => {
+                console.log("Mouseover")
+            }
+            const addToArray = () => {
+                console.log("Adding")
+                listPatients.value.push({
+                    name: "Bruno Freire",
+                    age: 25,
+                    data: counter
+                });
+            }
+
+            const code = {
+                a: 1,
+                b: 2,
+                c: 3
+            }
+
+
+            const helloWorld = ref("Adicionar");
+
+            const potentials = {
+                a: 5
+            }
+
+            const items = ["x"];
+            const subitems = ["A", "B", "C", "D", "E"]
+
+
+            return {
+                add,
+                remove,
+                onMouseover,
+                addToArray,
+                listPatients,
+                helloWorld,
+                items,
+                subitems,
+                counter,
+                potentials,
+                textInfo,
+                participant,
+                selector,
+                code,
+                changeParticipantName
+            }
+        })
+
+        console.log(componentTemplate)
+
+        //Wait for the document to load
+        document.addEventListener('DOMContentLoaded', () => {
+            document.body.appendChild(componentTemplate);
+        })
+    </script>
+</html>
